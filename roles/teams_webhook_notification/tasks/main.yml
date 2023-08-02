@@ -1,0 +1,23 @@
+---
+  - name: select hex for color name
+    ansible.builtin.set_fact:
+      hex_color: "{{ color_chooser.hex }}"
+    loop: "{{ color }}"
+    loop_control:
+      loop_var: color_chooser
+    when: color_chooser.name | lower == color_choice | lower
+    delegate_to: localhost
+  
+  - name: Create a Connector Card with the full format
+    community.general.office_365_connector_card:
+      webhook: "{{ team_to_uri_check.uri }}"
+      title: "{{ card_content.title }}"
+      text: "{{ card_content.text }}"
+      color: "{{ hex_color | upper }}"
+      sections: "{{ card_content.sections | default(omit) }}"
+    loop: "{{ webhook_uri }}"
+    loop_control:
+      loop_var: team_to_uri_check
+    when: team_to_uri_check.team | lower == team_to_notify | lower
+    delegate_to: localhost
+    ignore_errors: true
