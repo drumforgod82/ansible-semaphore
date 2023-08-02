@@ -1,0 +1,11 @@
+<html>
+  <body>
+    <h3>Please delete the following items in CNCPROD, in order from top to bottom:</h3>
+    <ul>
+      {% for item in full_list %}
+        <li>{{ item }}</li>
+      {% endfor %}
+      <li>{{ sddesign_number.record.0.number }}</li>
+    </ul>
+  </body>
+</html>
