@@ -1,0 +1,42 @@
+---
+# This will encode the header using the command module
+- name: encode header png
+  command: base64 ./roles/service_design_email/files/CenteneTechnologiesHeader.png
+  register: header_results
+
+# This will set the fact for the header image
+- name: set the fact for header
+  set_fact:
+    header_image: "{{ header_results.stdout }}"
+
+# This will encode the fotter using the command module
+- name: encode footer png
+  command: base64 ./roles/service_design_email/files/CenteneTechnologiesFooter.png
+  register: footer_results
+
+# This will set the fact for the footer image
+- name: set the fact for footer
+  set_fact:
+    footer_image: "{{ footer_results.stdout }}"
+
+# # This will set the fact to an empty list in case there are no stories in Ready to Deploy lane
+# - name: Set fact on the stories list in case there is none
+#   set_fact:
+#     story_joined_list: "{{ story_joined_list }}"
+#   changed_when: 0 == 1
+
+# This will send the email with the information
+- name: Send e-mail using Centene SMTP servers
+  mail:
+    host: mail.centene.com
+    from: service_design_automation@centene.com
+    port: 25
+    to:
+      - jamdean@centene.com
+      - "{{ on_call_email.record[0].email }}"
+    cc: "{{ cc_field }}"
+    subject: "{{ subject_field }}"
+    body: "{{ lookup('template', 'templates/email_template.html.j2') }}"
+    subtype: html
+  changed_when: 0 == 1
+  
