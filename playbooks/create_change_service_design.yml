@@ -1,0 +1,40 @@
+---
+  - hosts: localhost
+    gather_facts: false
+
+    collections:
+      - community.general
+      - servicenow.itsm
+
+    tasks:
+      # This will launch the role to create the change request for Service Design
+      - name: Launch Role to create change request
+        include_role:
+          name: service_design_change
+
+      # This will launch the role to send out an email    
+      - name: Lanuch Role to send out an email
+        include_role:
+          name: service_design_email
+
+      # This will run the Microsoft Teams webhook notification
+      - name: Webhook Notification for Service Design Change Request
+        include_role:
+          name: teams_webhook_notification
+        vars:
+          card_content:
+            title: "Change Request number for this weeks change: {{ change_request.record.number | default('') }}"
+            text: >-
+              <b>Change Date:</b> {{ date_short.stdout | default('') }}<br>
+              <b>List of Stories:</b> {{ story_joined_list_new | default('') }}
+          color_choice: "green"
+          team_to_notify: "service_design_ninjas"
+        when: change_request.record.number is defined
+
+      # This will print out the Change and task numbers
+      - name: Print out Change Request and task numbers
+        debug:
+          msg:
+            - "The Change Request number: {{ change_request.record.number }}"
+            - "The Implementation task number: {{ imp_task.record.number }}"
+            - "The Validation task number: {{ val_task.record.number }}"

@@ -1,0 +1,12 @@
+---
+sn_username: '{{ lookup("env", "SN_USERNAME") }}'
+sn_password: '{{ lookup("env", "SN_PASSWORD") }}'
+sn_instance: "{{ sn_instance }}"
+vtb_board: bf60757cdbd549108ec3aa1d139619c8
+vtb_lane: 548075bcdbd549108ec3aa1d139619af
+service_offering: "IT Service Design"
+source_justification: "Application - Enhancement"
+cmdb_ci: "ServiceNow Service Design"
+assignment_group: "IT-Server Windows DevOps"
+assigned_to: jamdean
+shift: []

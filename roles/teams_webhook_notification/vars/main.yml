@@ -1,0 +1,31 @@
+---
+  webhook_uri:
+    - team: green_hornets
+      uri: "https://<domain>.webhook.office.com/webhookb2/<info>/IncomingWebhook/<Info>" # yamllint disable-line rule:line-length
+    - team: it_server_windows_build
+      uri: "https://<domain>.webhook.office.com/webhookb2/<info>/IncomingWebhook/<Info>"  # yamllint disable-line rule:line-length
+    - team: service_design_ninjas
+      uri: "https://<domain>.webhook.office.com/webhookb2/<info>/IncomingWebhook/<Info>"  # yamllint disable-line rule:line-length
+  
+  color:
+    - name: "red"
+      hex: ff0000
+    - name: "orange"
+      hex: ff8000
+    - name: "yellow"
+      hex: ffff00
+    - name: "green"
+      hex: 00ff00
+    - name: "blue"
+      hex: 0000ff
+    - name: "purple"
+      hex: 8000ff
+    - name: "white"
+      hex: ffffff
+    - name: "grey"
+      hex: 808080
+    - name: "black"
+      hex: 000000
+    - name: "brown"
+      hex: 964b00
+  

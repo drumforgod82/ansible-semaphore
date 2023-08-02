@@ -1,0 +1,166 @@
+---
+  - name: Add Stories to Change Request
+    hosts: localhost
+    gather_facts: false
+
+    vars:
+      instance: "{{ instance }}"
+      change_request_number: "{{ change_request_number }}"
+      vtb_board: bf60757cdbd549108ec3aa1d139619c8
+      vtb_lane: 548075bcdbd549108ec3aa1d139619af
+
+    collections:
+      - servicenow.itsm
+
+    tasks:
+      # This will grab all of the VTB stories that are in the Ready to deploy lane
+      - name: Get VTB stories in Ready to deploy lane
+        servicenow.itsm.api_info:
+          instance:
+            host: "{{ instance }}"
+            username: '{{ lookup("env", "SN_USERNAME") }}'
+            password: '{{ lookup("env", "SN_PASSWORD") }}'
+          resource: vtb_card
+          sysparm_query: board={{ vtb_board }}^lane={{ vtb_lane }}
+          columns:
+            - task
+        ignore_errors: true
+        register: vtb_cards
+
+      # This will get just the list of sys_ids into a list
+      - name: Get just the list of the sys_ids into a list without the sys_id name
+        ansible.builtin.set_fact:
+          vtb_stories: "{{ vtb_cards | json_query('record[*].task.value') }}"
+        when: vtb_cards | length > 0
+
+      # This will get just the story number and short description for each story
+      - name: Get the Story number and Short Description for each story
+        servicenow.itsm.api_info:
+          instance:
+            host: "{{ instance }}"
+            username: '{{ lookup("env", "SN_USERNAME") }}'
+            password: '{{ lookup("env", "SN_PASSWORD") }}'
+          resource: rm_story
+          sysparm_query: sys_id={{ item }}
+          columns:
+            - number
+            - short_description
+        loop: "{{ vtb_stories }}"
+        register: story_list
+        when: vtb_cards | length > 0
+
+      # This will get just the number and short description into a list
+      - name: Get just the number and Short Description into a list
+        ansible.builtin.set_fact:
+          story_info: "{{ story_list.results | json_query('[*].record[*].{number: number, short_description: short_description}') }}"
+        when: vtb_cards | length > 0
+
+      # This will join the list of numbers and short descriptions from the above task
+      - name: Join list of numbers and short descriptions
+        ansible.builtin.set_fact:
+          story_joined_list: "{{ story_info | json_query('[].join(`: `, [number,short_description])') }}"
+        when: vtb_cards | length > 0
+
+      # This will set the list to have \n new lines to be able to add to the change without it looking funny
+      # yamllint disable rule:comments-indentation
+      - name: Setting List to new lines using jinja2
+        ansible.builtin.set_fact:
+          story_joined_list_new: |
+                                  {%for story in story_joined_list%}
+                                  {{ story }}
+                                  {%endfor%}
+        when: vtb_cards | length > 0
+
+      # This will get just the story numbers into a list
+      - name: Get just the number into a List
+        ansible.builtin.set_fact:
+          story_numbers: "{{ story_list.results | json_query('[*].record[*].{number: number}') }}"
+        when: vtb_cards | length > 0
+
+      # This will joing the list of numbers together
+      - name: Join list of numbers together
+        ansible.builtin.set_fact:
+          story_number_list: "{{ story_numbers | json_query('[].join(`: `,[number])') }}"
+        when: vtb_cards | length > 0
+
+      # This will get the local update sets for each story via the sys_update_set table in dev
+      - name: Get local update sets for each story
+        servicenow.itsm.api_info:
+          instance:
+            host: "https://cncdev.service-now.com"
+            username: '{{ lookup("env", "SN_USERNAME") }}'
+            password: '{{ lookup("env", "SN_PASSWORD") }}'
+          resource: sys_update_set
+          sysparm_query: nameLIKE{{ item }}
+        loop: "{{ story_number_list }}"
+        register: update_sets
+        when: vtb_cards | length > 0
+
+      # This will get just the names for the update sets into a list
+      - name: Get just the names for the update sets into a list
+        ansible.builtin.set_fact:
+          update_set_names: "{{ update_sets.results | json_query('[*].record[*].{name: name}') }}"
+        when: vtb_cards | length > 0
+
+      # This will join the list of update set names into a list
+      - name: Join list of update set names into a list
+        ansible.builtin.set_fact:
+          update_set_joined_list: "{{ update_set_names | json_query('[].join(`: `,[name])') }}"
+        when: vtb_cards | length > 0
+
+      # This will set the list to have \n new lines to be able to add to the change without it looking funny
+      # yamllint disable rule:comments-indentation
+      - name: Setting update set List to new lines using jinja2
+        ansible.builtin.set_fact:
+          update_set_list_new: |
+                                  {%for name in update_set_joined_list%}
+                                  {{ name }}
+                                  {%endfor%}
+        when: vtb_cards | length > 0
+
+      # This will update the change request to add the stories to the description field on the change
+      - name: Update change to add stories to the change request
+        servicenow.itsm.change_request:
+          instance:
+            host: "{{ instance }}"
+            username: '{{ lookup("env", "SN_USERNAME") }}'
+            password: '{{ lookup("env", "SN_PASSWORD") }}'
+          number: "{{ change_request_number }}"
+          description: "Story# & Description:\n{{ story_joined_list_new }}\n\nIf any issues arise, contact the change owner"
+        when: story_joined_list_new is defined
+
+      # This will update the change request to add the update sets to the implementation_plan and backout_plan fields
+      - name: Update change to add update sets to the Implementation_plan and backout_plan fields
+        servicenow.itsm.change_request:
+          instance:
+            host: "{{ instance }}"
+            username: '{{ lookup("env", "SN_USERNAME") }}'
+            password: '{{ lookup("env", "SN_PASSWORD") }}'
+          number: "{{ change_request_number }}"
+          # This will update the fields that are not on the change_request module.  Which is why it is called other.
+          other:
+            implementation_plan: "1) In ServiceNow, search in filter navigator for retrieved update sets.\n2) Search for name =\n\nStories need to be pushed from top to bottom:\n\n{{ update_set_list_new }}\nDeployment Instructions:\nA) Set business rule to inactive before testing in PROD, (CNC) Run Automation\nB) Set business rule to active after testing completed in PROD, (CNC) Run Automation\n\n3) Open Record\n4) Click 'Run Preview Again' button\n5) Click 'Commit Update Set' button"
+            backout_plan: "Backout Plan: Update sets listed below will be backed out using the following steps:\nBackout update sets in the reverse order that they were committed.\n1) In ServiceNow, search in filter navigator for: local update sets\n2) Search for: name =\n\nStories need to be backed out from bottom to top:\n\n{{ update_set_list_new }}\n\nDeployment Instructions:\nA) Set business rule to inactive before testing in PROD, (CNC) Run Automation\nB) Set business rule to active after testing completed in PROD, (CNC) Run Automation\n\n3) Open record\n4) Click 'Back Out' button"
+        when: update_set_list_new is defined
+
+      # This will add the stories to the change request on the stories tab
+      - name: Add stories to the change request on the stories tab
+        servicenow.itsm.api:
+          instance:
+            host: "{{ instance }}"
+            username: '{{ lookup("env", "SN_USERNAME") }}'
+            password: '{{ lookup("env", "SN_PASSWORD") }}'
+          resource: u_m2m_change_requests_stories
+          action: post
+          data:
+            u_change_request: "{{ change_request_number }}"
+            u_story: "{{ item }}"
+        loop: "{{ vtb_stories }}"
+        register: change_stories
+        when: item | length > 0
+
+      # This will print out the results if the previous task was changed
+      - name: Print out results
+        ansible.builtin.debug:
+          var: change_stories.results.0.diff.after
+        when: change_stories is changed

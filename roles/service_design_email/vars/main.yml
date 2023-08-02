@@ -1,0 +1,14 @@
+---
+cc_field:
+  - email@example.com
+  - email2@example.com
+
+subject_field: "Change Request information for Service Design Change"
+
+# This will pass into the jinja2 template for the email
+wording: "Here is the Change Request number:"
+
+# These next two variables are needed so the command knows where to look for the images
+header_results: "{{ lookup('file', 'files/CenteneTechnologiesHeader.png') }}"
+
+footer_results: "{{ lookup('file', 'files/CenteneTechnologiesFooter.png') }}"

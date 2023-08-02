@@ -1,0 +1,24 @@
+---
+  team_to_notify: "service_design_ninjas"
+  
+  color_choice: "blue"
+  
+  card_content:
+    title: This is the **card's title** property
+    text: This is the **card's text** property. Lorem ipsum dolor sit amet, consectetur
+      adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.
+    # sections:
+    #   - title: This is the **section's title** property
+    #     activity_title: This is the section's **activityTitle** property
+    #     activity_subtitle: This is the section's **activitySubtitle** property
+    #     activity_text: This is the section's **activityText** property.
+    #     text: This is the section's text property. Lorem ipsum dolor sit amet, consectetur
+    #       adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.
+    #     facts:
+    #       - name: This is a fact name
+    #         value: This is a fact value
+    #       - name: This is a fact name
+    #         value: This is a fact value
+    #       - name: This is a fact name
+    #         value: This is a fact value
+  
