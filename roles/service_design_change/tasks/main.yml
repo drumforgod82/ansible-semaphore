@@ -1,0 +1,247 @@
+---
+# Get todays date
+- name: Get todays date
+  command: date '+%m/%d/%Y'
+  register: date_result
+  changed_when: 0 == 1
+
+# Will set the short date to use on the short description of the change
+- name: Set the date to short for the short description
+  command: "date -d \"{{ date_result.stdout }} + 2 day\" '+%m/%d/%Y'"
+  register: date_short
+  changed_when: 0 == 1
+
+# Can share with Implementation CTASK start
+- name: Start date of the Change Request
+  command: "date -d '{{ date_result.stdout }} + 2 day + 20 hour' '+%Y-%m-%d %H:%M:%S' --utc"
+  register: change_start
+  changed_when: 0 == 1
+
+# Start time of Validation CTASK
+- name: Start time of the Validation CTASK
+  command: "date -d \"{{ date_result.stdout }} + 2 day + 20 hour + 10 minute\" '+%Y-%m-%d %H:%M:%S' --utc"
+  register: validation_start
+  changed_when: 0 == 1
+
+# Can share with Implementation and validation CTASK end
+- name: End date of the Change Request
+  command: "date -d \"{{ date_result.stdout }} + 2 day + 22 hour\" '+%Y-%m-%d %H:%M:%S' --utc"
+  register: change_end
+  changed_when: 0 == 1
+
+# Convert Central Time to UTC
+- name: Convert Central Time to UTC
+  command: date -d 'TZ="America/Chicago" {{ item.stdout }}' '+%Y-%m-%d %H:%M:%S' --utc
+  register: dates
+  changed_when: 0 == 1
+  with_items:
+    - "{{ change_start }}"
+    - "{{ validation_start }}"
+    - "{{ change_end }}"
+
+# Extract UTC times from the last task
+- name: Exctract UTC times from last task
+  set_fact:
+    shift: "{{ shift + [item.stdout] }}"
+  with_items: "{{ dates.results }}"
+
+# Prints out the variables to the screen
+- name: Validate change date vars
+  ansible.builtin.debug:
+    msg:
+      - "The current date and time is: {{ date_result.stdout }}"
+      - "Change Start is: {{ shift[0] }}"
+      - "Change End is: {{ shift[2] }}"
+
+# This will get all of the VTB stories that are in Ready to deploy.  This uses the vtb board for Service Design and the Ready to deploy lane
+- name: Get VTB stories in Ready to deploy lane
+  servicenow.itsm.api_info:
+    instance:
+      username: "{{ sn_username }}"
+      password: "{{ sn_password }}"
+      host: "{{ sn_instance }}"
+    resource: vtb_card
+    sysparm_query: board={{ vtb_board }}^lane={{ vtb_lane }}
+    columns:
+      - task
+  ignore_errors: true
+  register: vtb_cards
+
+# This will set the list to just the task value sys_ids
+- name: Get just the list of sys_ids into a list without the sys_id name
+  ansible.builtin.set_fact:
+    vtb_stories: "{{ vtb_cards | json_query('record[*].task.value') }}"
+  when: vtb_cards | length > 0
+
+# This will get the story number and short descriptions from each story in the above list
+- name: Get the Story number and Short description for each story
+  servicenow.itsm.api_info:
+    instance:
+      username: "{{ sn_username }}"
+      password: "{{ sn_password }}"
+      host: "{{ sn_instance }}"
+    resource: rm_story
+    sysparm_query: sys_id={{ item }}
+    columns:
+      - number
+      - short_description
+  loop: "{{ vtb_stories }}"
+  register: story_list
+  when: vtb_cards | length > 0
+
+# This will just show the numbers and short descriptions in a list
+- name: Get just the number and short descriptions in to a list
+  ansible.builtin.set_fact:
+    story_info: "{{ story_list.results | json_query('[*].record[*].{number: number, short_description: short_description}') }}"
+  when: vtb_cards | length > 0
+
+# This will join just the values of the number and short_descriptions
+- name: Join list of numbers and short_descriptions
+  ansible.builtin.set_fact:
+    story_joined_list: "{{ story_info | json_query('[].join(`: `, [number,short_description])') }}"
+  when: vtb_cards | length > 0
+
+# yamllint disable rule:comments-indentation
+# This will set the list to new lines using jinja2
+- name: Setting list to new lines using jinja2
+  ansible.builtin.set_fact:
+    story_joined_list_new: |
+                            {%for story in story_joined_list%}
+                            {{ story }}
+                            {%endfor%}
+  when: vtb_cards | length > 0
+
+# yamllint enable rule:comments-indentation
+# This will create the change request
+- name: Create a Change Request for Service Design
+  servicenow.itsm.change_request:
+    instance:
+      username: "{{ sn_username }}"
+      password: "{{ sn_password }}"
+      host: "{{ sn_instance }}"
+    type: normal
+    state: present
+    requested_by: "{{ assigned_to }}"
+    short_description: "ITSM Deployment - {{ date_short.stdout }} - ServiceNow Service Design"
+    description: "Story# & Description:\n{{ story_joined_list_new }}\n\nIf any issues arise, contact the change owner"
+    other:
+      service_offering: "{{ service_offering }}"
+      u_source_justification: "{{ source_justification }}"
+      cmdb_ci: "{{ cmdb_ci }}"
+      assignment_group: "{{ assignment_group }}"
+      assigned_to: "{{ assigned_to }}"
+      start_date: "{{ shift[0] }}"
+      end_date: "{{ shift[2] }}"
+      justification: "Purpose/Need (Why) for change: To update the workflow for the creation on service design and infra request process."
+      implementation_plan: "1) In ServiceNow, search in filter navigator for retrieved update sets.\n2) Search for name =\n\nStories need to be pushed from top to bottom:\n\n\nDeployment Instructions:\nA) Set business rule to inactive before testing in PROD, (CNC) Run Automation\nB) Set business rule to active after testing completed in PROD, (CNC) Run Automation\n\n3) Open Record\n4) Click 'Run Preview Again' button\n5) Click 'Commit Update Set' button"
+      risk_impact_analysis: "Low Risk - Any issues not caught  by testing would only impact service design or infra request in ServiceNow, will not affect the entire system. Service Designs or Infrastructure requests may have invalid field values or workflows may be incorrect and need re-processing.\n\nDoes Change cause service interruption? If so, how long? No\nDoes this change affect system functionality? If yes, how? No"
+      backout_plan: "Backout Plan: Update sets listed below will be backed out using the following steps:\nBackout update sets in the reverse order that they were committed.\n\n1) In ServiceNow, search in filter navigator for: local update sets\n2) Search for: name =\n\nStories need to be backed out from bottom to top\n\n\nDeployment Instructions:\nA) Set business rule to inactive before testing in PROD, (CNC) Run Automation\nB) Set business rule to active after testing completed in PROD, (CNC) Run Automation\n\n3) Open record\n4) Click 'Back Out' button"
+      test_plan: "Please see attachment(s) for test results."
+      u_validation_plan: "Developers and/or stakeholder will perform prod-validation once in production.\nValidation Steps:\n1) Smoke test code, workflow or configuration changes after deployment"
+      u_recovery_duration: "1970-01-01 00:30:00"
+  register: change_request
+
+# This will add the stories that are in the Ready to Deploy lane to the Change Request
+- name: Add stories to the Change Request that are in Ready to Deploy lane
+  servicenow.itsm.api:
+    instance:
+      username: "{{ sn_username }}"
+      password: "{{ sn_password }}"
+      host: "{{ sn_instance }}"
+    resource: u_m2m_change_requests_stories
+    action: post
+    data:
+      u_change_request: "{{ change_request.record.sys_id }}"
+      u_story: "{{ item }}"
+  loop: "{{ vtb_stories }}"
+  register: change_stories
+  when: item | length > 0
+
+# This will get the oncall person on the ServiceNow team
+- name: Get ServiceNow Developer On Call
+  ansible.builtin.uri:
+    url: "https://cncprod.service-now.com/api/now/on_call_rota/whoisoncall?rota_ids=7824ae681b7109905b89bbbc0a4bcb22&roster_ids=bd2f42e81b5a89105b89bbbc0a4bcbb5&group_ids=95f162641bfdc5905b89bbbc0a4bcbee&date_time={{ date_short.stdout }}"
+    method: GET
+    user: "{{ sn_username }}"
+    password: "{{ sn_password }}"
+    headers:
+      Accept: application/json
+    force_basic_auth: true
+    validate_certs: false
+    status_code: 200,201,202
+  environment:
+    http_proxy: ''
+    https_proxy: ''
+    no_proxy: ''
+  register: on_call_person
+
+- name: Get username of the on_call_person
+  servicenow.itsm.api_info:
+    instance:
+      host: "{{ sn_instance }}"
+      username: "{{ sn_username }}"
+      password: "{{ sn_password }}"
+    resource: sys_user
+    sysparm_query: sys_id={{ on_call_person.json.result[0].userId }}
+    columns:
+      - user_name
+      - email
+  register: on_call_email
+
+# This will create the Implementation Task
+- name: Create Implementation task
+  servicenow.itsm.change_request_task:
+    instance:
+      username: "{{ sn_username }}"
+      password: "{{ sn_password }}"
+      host: "{{ sn_instance }}"
+    state: present
+    change_request_number: "{{ change_request.record.number }}"
+    type: implementation
+    assignment_group: "IT-ServiceNow Development & Integrations"
+    assigned_to: "{{ on_call_email.record[0].user_name }}"
+    planned_start_date: "{{ shift[0] }}"
+    planned_end_date: "{{ shift[2] }}"
+    short_description: "Complete Integration for: {{ change_request.record.number }}"
+    description: "Complete Integration for: {{ change_request.record.number }}"
+  register: imp_task
+
+# This will create the Validation Task
+- name: Create Validation task
+  servicenow.itsm.change_request_task:
+    instance:
+      username: "{{ sn_username }}"
+      password: "{{ sn_password }}"
+      host: "{{ sn_instance }}"
+    state: present
+    change_request_number: "{{ change_request.record.number }}"
+    assignment_group: "{{ assignment_group }}"
+    assigned_to: "{{ assigned_to }}"
+    planned_start_date: "{{ shift[1] }}"
+    planned_end_date: "{{ shift[2] }}"
+    short_description: "Complete Validation for: {{ change_request.record.number }}"
+    description: "Complete Validation for: {{ change_request.record.number }}"
+    other:
+      change_task_type: "Validation"
+  register: val_task
+
+# # This will get the on-calls email address to pass to the email role
+# - name: Get on-call email address
+#   servicenow.servicenow.snow_record_find:
+#     table: sys_user
+#     username: "{{ sn_username }}"
+#     password: "{{ sn_password }}"
+#     instance: "{{ sn_instance }}"
+#     query:
+#       sys_id: "{{ on_call_person.json.result[0].userId }}"
+#     return_fields:
+#       - email
+#   register: on_call_email
+
+# This will print out the Change and task numbers
+- name: Print out Change Request and task numbers
+  debug:
+    msg:
+      - "The Change Request number: {{ change_request.record.number }}"
+      - "The Implementation task number: {{ imp_task.record.number }}"
+      - "The Validation task number: {{ val_task.record.number }}"
