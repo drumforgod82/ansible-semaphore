@@ -1,0 +1,149 @@
+---
+# Uses the html.j2 template in the following location templates/mail_body.html.j2
+  - name: Get Service Design tasks info
+    hosts: localhost
+    gather_facts: false
+
+    vars:
+      instance: "{{ instance }}"
+      design_number: "{{ design_number }}"
+      email_addr: "{{ email_addr }}"
+
+    collections:
+      - servicenow.itsm
+
+    tasks:
+      # This gest the Service Design number and sets the value sddesign_number
+      - name: Get Service Design number
+        servicenow.itsm.api_info:
+          instance:
+            username: '{{ lookup("env", "SN_USERNAME") }}'
+            password: '{{ lookup("env", "SN_PASSWORD") }}'
+            host: "{{ instance }}"
+          resource: x_cenr2_cnc_servic_service_design
+          sysparm_query: number={{ design_number }}
+        register: sddesign_number
+
+      #This gets the SDTASK numbers from the Service Design number from the above query
+      - name: Get Service Design tasks information
+        servicenow.itsm.api_info:
+          instance:
+            username: '{{ lookup("env", "SN_USERNAME") }}'
+            password: '{{ lookup("env", "SN_PASSWORD") }}'
+            host: "{{ instance }}"
+          resource: x_cenr2_cnc_servic_service_design_task
+          sysparm_query: service_design={{ sddesign_number.record.0.sys_id }}
+          columns:
+            - number
+        register: design_info
+
+      # This sets the variable sdtask_numbers into a list
+      - name: Sets the variable sdtask_numbers into a list
+        set_fact:
+          sdtask_numbers: "{{ design_info.record | json_query('[*].number') | list | sort }}"
+
+      # This gets the REQ numbers and sets it so the value request_item
+      - name: Get Requested Item REQ numbers
+        servicenow.itsm.api_info:
+          instance:
+            username: '{{ lookup("env", "SN_USERNAME") }}'
+            password: '{{ lookup("env", "SN_PASSWORD") }}'
+            host: "{{ instance }}"
+          resource: sc_request
+          sysparm_query: parent={{ sddesign_number.record.0.sys_id }}
+          columns:
+            - number
+            - sys_id
+        ignore_errors: yes
+        register: request_item
+
+      #This sets the variable for req_sysid_list into a list to display all of the sys_ids for the REQs
+      - name: Sets the variable for req_sysid_list into a list to display sys_ids of requests
+        set_fact:
+          req_sysid_list: "{{ request_item.record | json_query('[*].sys_id') | list | sort }}"
+        ignore_errors: yes
+        when: request_item != ""
+
+      # This sets the variable req_list into a list to display all of the REQ numbers (requested item).  This is used to print all of the REQ numbers at the full list task
+      - name: Sets the variable req_list into a list to display the REQ numbers
+        set_fact:
+          req_list: "{{ request_item.record | json_query('[*].number') | list | sort }}"
+        ignore_errors: yes
+        when: request_item != ""
+
+      #This will loop through the REQ numbers and get the RITM numbers
+      - name: Get RITM numbers from REQs
+        servicenow.itsm.api_info:
+          instance:
+            username: '{{ lookup("env", "SN_USERNAME") }}'
+            password: '{{ lookup("env", "SN_PASSWORD") }}'
+            host: "{{ instance }}"
+          resource: sc_req_item
+          sysparm_query: request={{ item }}
+              # not_equals:
+              #   record: ''
+          columns:
+            - number
+            - short_description
+        loop: "{{ req_sysid_list }}"
+        ignore_errors: yes
+        register: ritm_list
+
+      # This will flatten the list of RITMs from the previous task  
+      - name: Flatten the list of RITMs from previous task
+        set_fact:
+          list_of_ritms: "{{ list_of_ritms | default([]) + [item.number] }}"
+        loop: "{{ ritm_list.results | json_query('[*].record') | flatten }}"
+        ignore_errors: yes
+        when: ritm_list != ""
+
+      # This will list the items which can be used in the next task to get the CI name.  Only when the length is greater than zero, in otherwords; when item is not null (empty)
+      - name: List the items to be used in the next task only when length is greater than 0
+        set_fact:
+          list_of_cis: "{{ list_of_cis | default([]) + item }}"
+        loop: "{{ ritm_list.results | json_query('[*].record') }}"
+        when: item | length > 0
+        ignore_errors: yes
+
+      # This will set the records with Windows Server or Linux Server for the CI name
+      - name: Set the records that contains Windows Server or Linux Server for CI name
+        set_fact:
+          ci_info: "{{ ci_info | default([]) + [item.short_description] }}"
+        loop: "{{ list_of_cis }}"
+        when: item is search("Windows Server") or
+              item is search("Linux Server") or
+              item is search("Physical Appliance") or
+              item is search("Virtual Appliance") and
+              ritm_list != ""
+        ignore_errors: yes
+ 
+      # This will combine all of the items into one list
+      - name: Combine all of the items into one list
+        set_fact:
+          full_list: "{{ sdtask_numbers + req_list | default([]) + list_of_ritms | default([]) + ci_info | default([]) }}"
+
+      - name: Print the full list of tasks and items
+        debug:
+          var: full_list
+
+      - name: Send email to ServiceNow On-Call person for the items to cleanup
+        community.general.mail:
+          host: mail.centene.com
+          port: 25
+          from: noreply_sd_change@centene.com
+          to: "{{ email_addr }}"
+          cc:
+            - jamdean@centene.com
+            - Lisa.Baratta@wellcare.com
+            - Kenneth.King@CENTENE.COM
+            - abhilash.ravula@centene.com
+            - promise.ebinum@centene.com
+          subject: Items to delete from the Service Design Change Implementation
+          subtype: html
+          body: "{{ lookup('template', 'templates/mail_body.html.j2') }}\n
+            <p>Please double check for any additional tasks and delete them before deleting the Service Design.  The Service Design must be deleted last.</p>\n
+            <p>Sincerely,</p>
+            <p>Automation Team</p>
+          "
+
+#Command to run locally:  ansible-playbook servicenow_cmdb/get_sd_tasks.yml --ask-vault-pass
