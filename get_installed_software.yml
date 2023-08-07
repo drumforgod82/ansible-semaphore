@@ -1,0 +1,21 @@
+---
+  - name: Get all installed software
+    hosts: all
+    gather_facts: false
+    tasks:
+      - name: Win Ping
+        win_ping:
+        register: ping_results
+        ignore_errors: true
+        
+      - name: Gather list
+        # If you want to get specific software that is installed on a system.  Add '| Where-Object {$_.DisplayName -eq "Dynatrace OneAgent"}'
+        win_shell: Get-ItemProperty HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\* | Select-Object DisplayName, DisplayVersion, Publisher, InstallDate
+        register: software_list
+        when: ping_results is succeeded
+
+      # - debug:
+      #     msg: "{{ software_list.stdout.split('\n') }}"
+
+      - debug:
+          msg: "{{ software_list.stdout_lines }}"
