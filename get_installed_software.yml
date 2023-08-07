@@ -1,6 +1,6 @@
 ---
   - name: Get all installed software
-    hosts: win_computers
+    hosts: win-computers
     gather_facts: false
     tasks:
       - name: Win Ping
